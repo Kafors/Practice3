@@ -27,3 +27,55 @@
 * **Рішення в Impeller:** Оскільки всі шейдери компілюються AOT при збірці застосунку, час на компіляцію під час виконання дорівнює **0 мс**.
 
 ---
+
+## 3. Діаграми порівняння механізмів рендерингу (Mermaid)
+
+### Діаграма 1. Конвеєр компіляції шейдерів (Skia JIT vs Impeller AOT)
+
+```mermaid
+flowchart TB
+    subgraph Skia ["Skia Engine (Legacy JIT)"]
+        direction TB
+        S1["Запуск застосунку"] --> S2["Рендеринг кадру на пристрої"]
+        S2 --> S3{"Шейдер є в кеші GPU?"}
+        S3 -- Ні --> S4["БЛОКУВАННЯ Raster Thread!\nJIT-компіляція (30-100 мс)"]
+        S4 --> S5["Пропуск кадрів (Shader Jank)"]
+        S5 --> S6["Запис у кеш + малювання"]
+        S3 -- Так --> S7["Рендеринг кадру"]
+    end
+
+    subgraph Impeller ["Impeller Engine (Modern AOT)"]
+        direction TB
+        I1["Вихідний код GLSL 4.60"] --> I2["Build-time: Компілятор impellerc"]
+        I2 --> I3["Офлайн компіляція в SPIR-V / MSL & PSO"]
+        I3 --> I4["Вбудовування в бінарний код Flutter Engine"]
+        I4 --> I5["Запуск застосунку"]
+        I5 --> I6["Миттєва відправка команд у GPU (0 мс JIT delay)"]
+    end
+```
+
+### Діаграма 2. Поведінка графічного конвеєра під час виклику нової анімації
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI as UI Thread (Dart)
+    participant Engine as Raster Thread (Engine)
+    participant GPU as GPU Hardware
+
+    Note over UI, GPU: Сценарій 1: Skia (JIT)
+    UI->>Engine: Запит на рендеринг нової анімації
+    Note over Engine: Шейдер відсутній у кеші
+    Engine->>Engine: Компіляція GLSL драйвером GPU (> 30 мс)
+    Note over Engine: Бюджет кадру 16.6 мс перевищено!
+    Engine->>GPU: Відправка кадру (із запізненням)
+    GPU-->>UI: Відображення з ривком (Shader Jank)
+
+    Note over UI, GPU: Сценарій 2: Impeller (AOT)
+    UI->>Engine: Запит на рендеринг нової анімації
+    Note over Engine: Використання готового PSO (Pre-compiled)
+    Engine->>GPU: Відправка готового командного буфера (< 1 мс)
+    GPU-->>UI: Плавне відображення (60 / 120 FPS)
+```
+
+---
